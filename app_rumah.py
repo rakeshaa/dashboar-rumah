@@ -4,18 +4,18 @@ import numpy as np
 import matplotlib.pyplot as plt
 from catboost import CatBoostRegressor, Pool
 
-# ============================================
+# ======================================================
 # 1. PAGE CONFIG
-# ============================================
+# ======================================================
 st.set_page_config(
     page_title="Dashboard Harga Tanah",
     page_icon="🏠",
     layout="wide"
 )
 
-# ============================================
-# 2. FIXED REFERENCE (IDENTIK TRAINING)
-# ============================================
+# ======================================================
+# 2. REFERENSI (IDENTIK TRAINING)
+# ======================================================
 
 PROVINSI_LIST = [
     "Aceh","Sumatera Utara","Sumatera Barat","Riau","Kepulauan Riau","Jambi",
@@ -47,9 +47,9 @@ ranking = {
     "kondisi_tanah": ["Matang","Mentah","Tanah Sawah","Tanah Ladang","Tanah Rawa"]
 }
 
-# ============================================
+# ======================================================
 # 3. LOAD MODEL (NO TRAINING)
-# ============================================
+# ======================================================
 
 @st.cache_resource
 def load_model():
@@ -59,9 +59,9 @@ def load_model():
 
 model = load_model()
 
-# ============================================
-# 4. PREPROCESSING (STRICT IDENTIK)
-# ============================================
+# ======================================================
+# 4. PREPROCESSING (STRICT IDENTIK TRAINING)
+# ======================================================
 
 def ordinal_encode(df):
     df = df.copy()
@@ -73,6 +73,7 @@ def ordinal_encode(df):
 def feature_engineering(df):
     df = df.copy()
 
+    # provinsi HARUS tetap ada (categorical)
     df["log_luas_tanah"] = np.log1p(df["luas_tanah_m2"])
 
     df["aksesibilitas_index"] = (
@@ -104,16 +105,16 @@ def feature_engineering(df):
         df["frontage"] * 0.4
     )
 
-    # DROP RAW FEATURES (IDENTIK TRAINING)
+    # DROP RAW FEATURE (SESUAI TRAINING)
     df = df.drop(columns=["luas_tanah_m2"], errors="ignore")
 
     return df
 
-# ============================================
+# ======================================================
 # 5. UI INPUT
-# ============================================
+# ======================================================
 
-st.title("🏠 Estimasi Harga Tanah untuk Rumah Tempat Tinggal (Strict Model)")
+st.title("🏠 Estimasi Harga Tanah Ruko (FINAL – STRICT)")
 
 with st.form("input_form"):
     provinsi = st.selectbox("Provinsi", PROVINSI_LIST)
@@ -133,14 +134,17 @@ with st.form("input_form"):
     bentuk = st.selectbox("Bentuk Tanah", ranking["bentuk_tanah"])
     frontage = st.selectbox("Frontage", ranking["frontage"])
     topo = st.selectbox("Topografi", ranking["topografi_tanah"])
-    kontur = st.selectbox("Kontur Elevasi", ranking["kontur_elevasi_tanah_cm_diatas_jalan_dibawah_jalan"])
+    kontur = st.selectbox(
+        "Kontur Elevasi",
+        ranking["kontur_elevasi_tanah_cm_diatas_jalan_dibawah_jalan"]
+    )
     kondisi_tanah = st.selectbox("Kondisi Tanah", ranking["kondisi_tanah"])
 
     submit = st.form_submit_button("Hitung Estimasi Harga")
 
-# ============================================
-# 6. PREDICTION (STRICT)
-# ============================================
+# ======================================================
+# 6. PREDIKSI (FINAL & AMAN)
+# ======================================================
 
 if submit:
     df_raw = pd.DataFrame([{
@@ -164,25 +168,26 @@ if submit:
         "kondisi_tanah": kondisi_tanah
     }])
 
-    # STRICT PIPELINE
     df_encoded = ordinal_encode(df_raw)
     df_fe = feature_engineering(df_encoded)
 
-    # STRICT FEATURE MATCH
+    # STRICT FEATURE MATCH (TIDAK BISA ERROR LAGI)
     X = df_fe[model.feature_names_]
 
     pool = Pool(X, cat_features=["provinsi"])
     y_pred_log = model.predict(pool)
-    y_pred_juta = np.expm1(y_pred_log[0])
-    y_pred_rp = y_pred_juta * 1_000_000
+
+    # BALIK KE RUPIAH
+    harga_juta = np.expm1(y_pred_log[0])
+    harga_rp = harga_juta * 1_000_000
 
     st.success("Prediksi berhasil")
-    st.metric("Harga per m²", f"Rp {y_pred_rp:,.0f}")
-    st.metric("Estimasi Total Aset", f"Rp {y_pred_rp * luas_tanah:,.0f}")
+    st.metric("Harga Tanah (Rp / m²)", f"Rp {harga_rp:,.0f}")
+    st.metric("Estimasi Total Aset", f"Rp {harga_rp * luas_tanah:,.0f}")
 
-# ============================================
+# ======================================================
 # 7. FEATURE IMPORTANCE
-# ============================================
+# ======================================================
 
 with st.expander("Lihat Feature Importance"):
     fi = pd.DataFrame({
@@ -194,4 +199,3 @@ with st.expander("Lihat Feature Importance"):
     ax.barh(fi["Feature"], fi["Importance"])
     ax.invert_yaxis()
     st.pyplot(fig)
-
