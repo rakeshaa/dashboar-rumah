@@ -113,7 +113,7 @@ def feature_engineering(df):
 # 5. UI INPUT
 # ============================================
 
-st.title("🏠 Estimasi Harga Tanah Ruko (Strict Model)")
+st.title("🏠 Estimasi Harga Tanah untuk Rumah Tempat Tinggal (Strict Model)")
 
 with st.form("input_form"):
     provinsi = st.selectbox("Provinsi", PROVINSI_LIST)
@@ -194,3 +194,4 @@ with st.expander("Lihat Feature Importance"):
     ax.barh(fi["Feature"], fi["Importance"])
     ax.invert_yaxis()
     st.pyplot(fig)
+
