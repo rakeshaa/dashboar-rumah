@@ -188,8 +188,8 @@ if st.button("Hitung Estimasi Harga"):
 
     st.markdown(f"""
     <div class="metric-card">
-        <h3>Estimasi Harga:</h3>
-        <h1>Rp {harga_rp:,.0f} / m²</h1>
-        <p>Total Aset: Rp {harga_rp*luas:,.0f}</p>
+        <h3 style="color: #64748B; margin: 0;">Estimasi Harga:</h3>
+        <h1 style="color: #0F172A; margin: 0;">Rp {harga_rp:,.0f} / m²</h1>
+        <p style="color: #334155; margin: 0;">Total Aset: Rp {harga_rp*luas:,.0f}</p>
     </div>
     """, unsafe_allow_html=True)
