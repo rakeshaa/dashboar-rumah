@@ -1,8 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-from catboost import CatBoostRegressor
+from catboost import CatBoostRegressor, CatBoostClassifier
 
 # =====================================================
 # 1. PAGE CONFIG
@@ -14,7 +13,7 @@ st.set_page_config(
 )
 
 # =====================================================
-# 2. CSS
+# 2. CSS (Tampilan Premium - Teks Gelap)
 # =====================================================
 st.markdown("""
 <style>
@@ -41,6 +40,9 @@ st.markdown("""
     font-weight: bold;
     background-color: #3B82F6;
     color: white;
+}
+.stButton>button:hover {
+    background-color: #2563EB;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -79,28 +81,43 @@ ranking = {
 }
 
 # =====================================================
-# 4. LOAD MODEL
+# 4. LOAD MODELS (CLF & REG)
 # =====================================================
 @st.cache_resource
-def load_model():
-    model = CatBoostRegressor()
-    model.load_model("catboost_final.cbm")
-    return model
+def load_models():
+    # Load Stage 1: Classifier
+    clf = CatBoostClassifier()
+    clf.load_model("stage1_classifier.cbm")
+    
+    # Load Stage 2: Regressor
+    reg = CatBoostRegressor()
+    reg.load_model("stage2_regressor.cbm")
+    
+    return clf, reg
 
-model = load_model()
+try:
+    clf, reg = load_models()
+except Exception as e:
+    st.error(f"Gagal memuat model. Pastikan file 'stage1_classifier.cbm' dan 'stage2_regressor.cbm' ada di folder yang sama. Error: {e}")
+    st.stop()
 
 # =====================================================
-# 5. PREPROCESSING (OPS I 2 – FINAL)
+# 5. PREPROCESSING & ALIGNMENT
 # =====================================================
 def preprocess_input(df):
     df = df.copy()
 
-    df['provinsi'] = df['provinsi'].str.lower().str.strip()
+    # Pastikan format string lowercase
+    if 'provinsi' in df.columns:
+        df['provinsi'] = df['provinsi'].str.lower().str.strip()
 
+    # Ordinal Encoding
     for col, rank_list in ranking.items():
-        mapping = {cat: len(rank_list)-i for i,cat in enumerate(rank_list)}
-        df[col] = df[col].map(lambda x: mapping.get(x, np.median(list(mapping.values()))))
+        if col in df.columns:
+            mapping = {cat: len(rank_list)-i for i,cat in enumerate(rank_list)}
+            df[col] = df[col].map(lambda x: mapping.get(x, np.median(list(mapping.values()))))
 
+    # Feature Engineering
     df['log_luas_tanah'] = np.log1p(df['luas_tanah_m2'])
 
     df['aksesibilitas_index'] = (
@@ -122,22 +139,29 @@ def preprocess_input(df):
     df['legalitas_score'] = df['legalitas_tanah']**1.2
     df['efektivitas_lahan'] = df['bentuk_tanah']*0.6 + df['frontage']*0.4
 
+    # Duplicate log luas sebagai log harga total (sesuai logika training sebelumnya)
     df['log_harga_total'] = df['log_luas_tanah']
 
+    # Drop kolom raw yang sudah ditransformasi
     df.drop(columns=['luas_tanah_m2'], inplace=True)
+    
     return df
 
 def align_features(df, model):
+    """Memastikan urutan kolom sama persis dengan yang diminta model"""
     X = pd.DataFrame(index=df.index)
     for col in model.feature_names_:
-        X[col] = df[col] if col in df.columns else 0
+        if col in df.columns:
+            X[col] = df[col]
+        else:
+            X[col] = 0 # Default value jika fitur hilang
     return X
 
 # =====================================================
-# 6. UI
+# 6. USER INTERFACE
 # =====================================================
 st.markdown('<div class="main-header">🏠 Estimasi Harga Tanah</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Prediksi Harga Pasar Wajar (CatBoost)</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">Prediksi Harga Pasar Wajar (Two-Stage Model)</div>', unsafe_allow_html=True)
 
 col1, col2 = st.columns(2)
 
@@ -157,9 +181,14 @@ with col2:
     kondisi = st.selectbox("Kondisi Jalan", ranking["kondisi_jalan"])
     perkerasan = st.selectbox("Perkerasan Jalan", ranking["perkerasan_jalan"])
 
+# =====================================================
+# 7. EKSEKUSI PREDIKSI
+# =====================================================
 if st.button("Hitung Estimasi Harga"):
+
+    # 1. Tampung Input User
     df_input = pd.DataFrame([{
-        "provinsi": provinsi,
+        "provinsi": provinsi.lower(), # Pastikan lowercase
         "luas_tanah_m2": luas,
         "lebar_jalan_m": lebar,
         "jenis_informasi": jenis,
@@ -171,7 +200,7 @@ if st.button("Hitung Estimasi Harga"):
         "fasilitas_sosial_umum": fasum,
         "pencapaian_angkutan_umum": angkot,
         "gengsi_lingkungan": gengsi,
-        "legalitas_tanah": "SHM",
+        "legalitas_tanah": "SHM", # Default Value sesuai request
         "bentuk_tanah": "Empat Persegi Panjang",
         "frontage": "Normal",
         "topografi_tanah": "Datar",
@@ -179,17 +208,44 @@ if st.button("Hitung Estimasi Harga"):
         "kondisi_tanah": "Matang"
     }])
 
+    # 2. Preprocessing Data
     df_proc = preprocess_input(df_input)
-    X = align_features(df_proc, model)
 
-    y_log = model.predict(X)[0]
+    # 3. STAGE 1 – CLASSIFICATION (Menentukan Segmen)
+    # Align features khusus untuk Classifier
+    X_stage1 = align_features(df_proc, clf)
+    
+    # Predict Segment
+    segment_pred = clf.predict(X_stage1)[0]
+    
+    # Masukkan hasil prediksi segmen ke dalam dataframe untuk Stage 2
+    # Catatan: Kolom 'segment_pred' ini harus ada di Stage 2
+    df_proc['segment_pred'] = segment_pred 
+    # Jika outputnya array numpy (misal ['High']), ambil elemen stringnya
+    if isinstance(segment_pred, (np.ndarray, list)):
+        df_proc['segment_pred'] = segment_pred[0]
+
+
+    # 4. STAGE 2 – REGRESSION (Menentukan Harga)
+    # Align features khusus untuk Regressor (sekarang sudah ada kolom segment_pred)
+    X_stage2 = align_features(df_proc, reg)
+    
+    # Predict Log Harga
+    y_log = reg.predict(X_stage2)[0]
+
+    # Transformasi Balik (Log -> Harga Asli)
     harga_juta = np.expm1(y_log)
     harga_rp = harga_juta * 1_000_000
 
+    # 5. Output Tampilan
     st.markdown(f"""
     <div class="metric-card">
-        <h3 style="color: #64748B; margin: 0;">Estimasi Harga:</h3>
-        <h1 style="color: #0F172A; margin: 0;">Rp {harga_rp:,.0f} / m²</h1>
-        <p style="color: #334155; margin: 0;">Total Aset: Rp {harga_rp*luas:,.0f}</p>
+        <h3 style="color:#64748B; margin:0;">Estimasi Harga Tanah</h3>
+        <h1 style="color:#0F172A; margin:0;">Rp {harga_rp:,.0f} / m²</h1>
+        <hr style="margin: 10px 0; border-top: 1px solid #E2E8F0;">
+        <p style="color:#334155; margin:0;">
+            Segmen Klasifikasi: <b>{df_proc['segment_pred'].iloc[0]}</b><br>
+            Total Aset: <b>Rp {harga_rp*luas:,.0f}</b>
+        </p>
     </div>
     """, unsafe_allow_html=True)
