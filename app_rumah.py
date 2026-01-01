@@ -136,7 +136,7 @@ def preprocess_input(df_input):
 model = load_model()
 
 # Header Halaman
-st.markdown('<p class="main-header">🏠 Estimasi Harga Tanah Ruko</p>', unsafe_allow_html=True)
+st.markdown('<p class="main-header">🏠 Estimasi Harga Tanah untuk RUmah Tempat Tinggal </p>', unsafe_allow_html=True)
 st.markdown('<p class="sub-header">Prediksi Nilai Pasar Wajar menggunakan CatBoost Regression</p>', unsafe_allow_html=True)
 
 if model:
@@ -275,3 +275,4 @@ if model:
 
 else:
     st.error("🚨 File model 'catboost_final.cbm' tidak ditemukan. Harap upload file model ke direktori aplikasi.")
+
