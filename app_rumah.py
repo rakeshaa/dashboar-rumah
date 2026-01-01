@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt # Diperlukan untuk grafik
 from catboost import CatBoostRegressor, CatBoostClassifier
 
 # =====================================================
@@ -98,7 +99,7 @@ def load_models():
 try:
     clf, reg = load_models()
 except Exception as e:
-    st.error(f"Gagal memuat model. Pastikan file 'stage1_classifier.cbm' dan 'stage2_regressor.cbm' ada di folder yang sama. Error: {e}")
+    st.error(f"Gagal memuat model. Pastikan file .cbm ada di folder yang sama. Error: {e}")
     st.stop()
 
 # =====================================================
@@ -188,7 +189,7 @@ if st.button("Hitung Estimasi Harga"):
 
     # 1. Tampung Input User
     df_input = pd.DataFrame([{
-        "provinsi": provinsi.lower(), # Pastikan lowercase
+        "provinsi": provinsi.lower(), 
         "luas_tanah_m2": luas,
         "lebar_jalan_m": lebar,
         "jenis_informasi": jenis,
@@ -212,25 +213,16 @@ if st.button("Hitung Estimasi Harga"):
     df_proc = preprocess_input(df_input)
 
     # 3. STAGE 1 – CLASSIFICATION (Menentukan Segmen)
-    # Align features khusus untuk Classifier
     X_stage1 = align_features(df_proc, clf)
-    
-    # Predict Segment
     segment_pred = clf.predict(X_stage1)[0]
     
-    # Masukkan hasil prediksi segmen ke dalam dataframe untuk Stage 2
-    # Catatan: Kolom 'segment_pred' ini harus ada di Stage 2
+    # Masukkan hasil prediksi segmen ke dataframe
     df_proc['segment_pred'] = segment_pred 
-    # Jika outputnya array numpy (misal ['High']), ambil elemen stringnya
     if isinstance(segment_pred, (np.ndarray, list)):
         df_proc['segment_pred'] = segment_pred[0]
 
-
     # 4. STAGE 2 – REGRESSION (Menentukan Harga)
-    # Align features khusus untuk Regressor (sekarang sudah ada kolom segment_pred)
     X_stage2 = align_features(df_proc, reg)
-    
-    # Predict Log Harga
     y_log = reg.predict(X_stage2)[0]
 
     # Transformasi Balik (Log -> Harga Asli)
@@ -249,3 +241,55 @@ if st.button("Hitung Estimasi Harga"):
         </p>
     </div>
     """, unsafe_allow_html=True)
+
+# =====================================================
+# 8. FEATURE IMPORTANCE (TAMBAHAN)
+# =====================================================
+st.markdown("---")
+st.markdown('<div class="sub-header">📊 Analisis Faktor Pengaruh (Feature Importance)</div>', unsafe_allow_html=True)
+
+with st.expander("Lihat Grafik Detail"):
+    
+    # Tab untuk memilih model mana yang ingin dilihat
+    tab_fi1, tab_fi2 = st.tabs(["Faktor Penentu Harga (Regresi)", "Faktor Penentu Segmen (Klasifikasi)"])
+    
+    def plot_fi(model, color_hex):
+        # Ambil Feature Importance dari model CatBoost
+        fi_df = pd.DataFrame({
+            "Feature": model.feature_names_,
+            "Importance": model.get_feature_importance()
+        }).sort_values(by="Importance", ascending=False).head(15) # Top 15 Features
+
+        # Plotting
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.barh(fi_df["Feature"], fi_df["Importance"], color=color_hex)
+        ax.invert_yaxis() # Fitur terpenting di atas
+        
+        # Styling Chart agar bersih
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_visible(False)
+        ax.spines['bottom'].set_color('#CBD5E1')
+        ax.tick_params(axis='x', colors='#64748B')
+        ax.tick_params(axis='y', colors='#334155')
+        ax.set_xlabel("Tingkat Signifikansi", color='#64748B')
+        
+        return fig, fi_df
+
+    # --- TAB 1: REGRESSOR ---
+    with tab_fi1:
+        st.caption("Grafik ini menunjukkan variabel apa saja yang paling mempengaruhi **Nominal Harga** (Model Tahap 2).")
+        fig1, df1 = plot_fi(reg, "#3B82F6") # Warna Biru
+        st.pyplot(fig1)
+        # Opsional: Tampilkan tabel data
+        if st.checkbox("Tampilkan Data Tabel (Regresi)"):
+            st.dataframe(df1, use_container_width=True)
+
+    # --- TAB 2: CLASSIFIER ---
+    with tab_fi2:
+        st.caption("Grafik ini menunjukkan variabel apa saja yang paling mempengaruhi **Penentuan Kelas Segmen** (Model Tahap 1).")
+        fig2, df2 = plot_fi(clf, "#64748B") # Warna Abu-abu
+        st.pyplot(fig2)
+        # Opsional: Tampilkan tabel data
+        if st.checkbox("Tampilkan Data Tabel (Klasifikasi)"):
+            st.dataframe(df2, use_container_width=True)
